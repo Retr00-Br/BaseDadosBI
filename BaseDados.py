@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from supabase import create_client, Client
 import datetime
 
@@ -29,6 +30,25 @@ except Exception as e:
 
 
 # -----------------------------------------------------------------------------
+# Funções de Higienização de Dados (Antierro de JSON / NaN)
+# -----------------------------------------------------------------------------
+def sanitize_value(val):
+    """Converte valores NaN/NaT do Pandas/Numpy para None (null no JSON)."""
+    if pd.isna(val) or val is np.nan:
+        return None
+    return val
+
+
+def clean_records(records):
+    """Limpa uma lista de dicionários substituindo qualquer NaN por None."""
+    cleaned = []
+    for row in records:
+        cleaned_row = {k: sanitize_value(v) for k, v in row.items()}
+        cleaned.append(cleaned_row)
+    return cleaned
+
+
+# -----------------------------------------------------------------------------
 # Funções de Tratamento para Cada Aba
 # -----------------------------------------------------------------------------
 
@@ -39,22 +59,23 @@ def process_sheet_base(xl_file):
         'Vl.NF': 'vl_nf', 'Dt.Entrega': 'dt_entrega', 'TRANSPORTE': 'transporte',
         'DATA DE EMBARQUE': 'data_embarque'
     })
-    df = df.dropna(subset=['num_nf'])
+    
+    # Remove registros sem número de nota fiscal
+    df = df[pd.to_numeric(df['num_nf'], errors='coerce').notna()].copy()
     df['num_nf'] = df['num_nf'].astype(int)
-    df['num_pv'] = df['num_pv'].apply(lambda x: float(x) if pd.notna(x) else None)
-    df['vl_nf'] = df['vl_nf'].apply(lambda x: float(x) if pd.notna(x) else 0.0)
-
+    
+    # Formatação de datas
     for col in ['dt_entrega', 'data_embarque']:
-        df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
-        df[col] = df[col].where(pd.notna(df[col]), None)
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-    df['nome_fantasia'] = df['nome_fantasia'].fillna('').astype(str)
-    df['transporte'] = df['transporte'].fillna('').astype(str)
-    return df.to_dict(orient='records')
+    records = df.to_dict(orient='records')
+    return clean_records(records)
 
 
 def process_sheet_romaneios(xl_file):
     df = pd.read_excel(xl_file, sheet_name='ROMANEIOS')
+    
     # Preenche cabeçalhos de romaneio mesclados para baixo
     for col in ['Nr. Romaneio', 'Dt. Romaneio', 'Desc.Veiculo', 'Placa Veiculo', 'Condutor']:
         if col in df.columns:
@@ -79,13 +100,8 @@ def process_sheet_romaneios(xl_file):
     df['dt_entrega'] = pd.to_datetime(df['dt_entrega'], errors='coerce').dt.strftime('%Y-%m-%d')
     df['emissao'] = pd.to_datetime(df['emissao'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
 
-    for col in ['dt_romaneio', 'dt_entrega', 'emissao']:
-        df[col] = df[col].where(pd.notna(df[col]), None)
-
-    df['num_pv'] = df['num_pv'].apply(lambda x: float(x) if pd.notna(x) else None)
-    df['vl_nf'] = df['vl_nf'].apply(lambda x: float(x) if pd.notna(x) else 0.0)
-
-    return df.to_dict(orient='records')
+    records = df.to_dict(orient='records')
+    return clean_records(records)
 
 
 def process_sheet_consolidado(xl_file):
@@ -97,17 +113,11 @@ def process_sheet_consolidado(xl_file):
         'EMB. CORREIOS': 'emb_correios', 'RETIRA': 'retira', 'EMB. MOTOBOY': 'emb_motoboy',
         'EMB. LALAMOVE': 'emb_lalamove'
     })
-    df = df.dropna(subset=['data_romaneio'])
     df['data_romaneio'] = pd.to_datetime(df['data_romaneio'], errors='coerce').dt.strftime('%Y-%m-%d')
     df = df[df['data_romaneio'].notna()]
 
-    int_cols = ['total_notas_expedidas', 'emb_terceiros', 'emb_carro_proprio',
-                'emb_transportadoras', 'emb_correios', 'retira', 'emb_motoboy', 'emb_lalamove']
-    for c in int_cols:
-        df[c] = df[c].fillna(0).astype(int)
-    df['valor_total_embarcado'] = df['valor_total_embarcado'].fillna(0.0).astype(float)
-
-    return df.to_dict(orient='records')
+    records = df.to_dict(orient='records')
+    return clean_records(records)
 
 
 def process_sheet_planilha6(xl_file):
@@ -119,17 +129,11 @@ def process_sheet_planilha6(xl_file):
         'Soma de RETIRA': 'retira', 'Soma de EMB. MOTOBOY': 'emb_motoboy',
         'Soma de EMB. LALAMOVE': 'emb_lalamove', 'Soma de VALOR TOTAL EMBARCADO': 'valor_total_embarcado'
     })
-    # Remove linhas de Total Geral ou texto inválido
     df['data_rotulo'] = pd.to_datetime(df['data_rotulo'], errors='coerce').dt.strftime('%Y-%m-%d')
-    df = df.dropna(subset=['data_rotulo'])
+    df = df[df['data_rotulo'].notna()]
 
-    int_cols = ['total_notas_expedidas', 'emb_carro_proprio', 'emb_terceiros',
-                'emb_transportadoras', 'emb_correios', 'retira', 'emb_motoboy', 'emb_lalamove']
-    for c in int_cols:
-        df[c] = df[c].fillna(0).astype(int)
-    df['valor_total_embarcado'] = df['valor_total_embarcado'].fillna(0.0).astype(float)
-
-    return df.to_dict(orient='records')
+    records = df.to_dict(orient='records')
+    return clean_records(records)
 
 
 # -----------------------------------------------------------------------------
