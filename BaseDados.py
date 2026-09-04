@@ -81,7 +81,7 @@ def process_sheet_romaneios(xl_file):
         if col in df.columns:
             df[col] = df[col].ffill()
 
-    # Mapeia colunas não nomeadas
+    # Mapeia colunas conhecidas
     df = df.rename(columns={
         'Nr. Romaneio': 'nr_romaneio', 'Dt. Romaneio': 'dt_romaneio', 'Desc.Veiculo': 'desc_veiculo',
         'Placa Veiculo': 'placa_veiculo', 'Condutor': 'condutor', 'Unnamed: 5': 'filial',
@@ -89,16 +89,28 @@ def process_sheet_romaneios(xl_file):
         'Unnamed: 9': 'num_pv', 'Unnamed: 10': 'num_nf', 'Unnamed: 11': 'vl_nf', 'Unnamed: 12': 'dt_entrega'
     })
 
-    # Descarta linhas de cabeçalho repetidas
+    # Descarta linhas de cabeçalho repetidas e garante que num_nf seja numérico
     df = df[pd.to_numeric(df['num_nf'], errors='coerce').notna()].copy()
     df['num_nf'] = df['num_nf'].astype(int)
 
     # Cria ID único composto
     df['id_romaneio_nf'] = df['nr_romaneio'].astype(str) + "_" + df['num_nf'].astype(str)
 
+    # Formatação de datas
     df['dt_romaneio'] = pd.to_datetime(df['dt_romaneio'], errors='coerce').dt.strftime('%Y-%m-%d')
     df['dt_entrega'] = pd.to_datetime(df['dt_entrega'], errors='coerce').dt.strftime('%Y-%m-%d')
     df['emissao'] = pd.to_datetime(df['emissao'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 🚨 SOLUÇÃO DO ERRO: Mantém APENAS as colunas válidas no banco de dados
+    valid_columns = [
+        'id_romaneio_nf', 'nr_romaneio', 'dt_romaneio', 'desc_veiculo', 
+        'placa_veiculo', 'condutor', 'filial', 'emissao', 'cliente_loja', 
+        'nome_fantasia', 'num_pv', 'num_nf', 'vl_nf', 'dt_entrega'
+    ]
+    
+    # Filtra apenas as colunas que existem na lista acima
+    cols_to_keep = [col for col in valid_columns if col in df.columns]
+    df = df[cols_to_keep]
 
     records = df.to_dict(orient='records')
     return clean_records(records)
